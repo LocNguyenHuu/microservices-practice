@@ -20,26 +20,102 @@ Most microservice tutorials use generic e-commerce (orders, products, carts). Th
 
 ## Architecture
 
+```mermaid
+graph TB
+    Client["Clients / ATC Systems"]
+
+    subgraph Services
+        FS["Flight Service\nGo / chi\n:8080"]
+        TS["Turnaround Service\nNestJS / Mongoose\n:3000"]
+        CS["Crew Service\nFastAPI / SQLAlchemy\n:8000"]
+        OH["Ops Hub Service\nRust / axum\n:8001"]
+    end
+
+    subgraph Broker["Message Broker"]
+        RMQ[("RabbitMQ\nTopic Exchanges")]
+    end
+
+    subgraph Data["Data Stores"]
+        PG1[("PostgreSQL\nflight_db")]
+        MDB[("MongoDB\nturnaround_db")]
+        PG2[("PostgreSQL\ncrew_db")]
+        PG3[("PostgreSQL\nops_db")]
+    end
+
+    Client -->|REST| FS
+    Client -->|REST| TS
+    Client -->|REST| CS
+    Client -->|REST| OH
+
+    FS -- "flight.*" --> RMQ
+    TS -- "turnaround.*" --> RMQ
+    CS -- "crew.*" --> RMQ
+    RMQ --> TS
+    RMQ --> CS
+    RMQ --> OH
+
+    OH -.->|"HTTP poll\n(scheduler)"| FS
+    OH -.->|"HTTP poll\n(scheduler)"| TS
+    OH -.->|"HTTP poll\n(scheduler)"| CS
+
+    FS --- PG1
+    TS --- MDB
+    CS --- PG2
+    OH --- PG3
+
+    classDef svc fill:#4a9eff,stroke:#2d7cd6,color:#fff
+    classDef broker fill:#ff9f43,stroke:#e08a2e,color:#fff
+    classDef db fill:#2ed573,stroke:#1ea85a,color:#fff
+    classDef client fill:#a55eea,stroke:#8044c4,color:#fff
+
+    class FS,TS,CS,OH svc
+    class RMQ broker
+    class PG1,MDB,PG2,PG3 db
+    class Client client
 ```
-                    +--------------+
-                    |   Clients    |
-                    +------+-------+
-                           |
-          +--------+-------+-------+--------+
-          |        |               |        |
-   +------v--+  +--v----------+  +v------+ +v-----------+
-   | Flight   |  | Turnaround  |  | Crew  | | Ops Hub    |
-   | Service  |  | Service     |  | Svc   | | Service    |
-   | Go/chi   |  | NestJS      |  |FastAPI| | Rust/axum  |
-   +----+-----+  +-----+-------+  +---+---+ +-----+------+
-        |              |              |            |
-        +------+ RabbitMQ +-----------+            |
-        |  flight.*  | turnaround.* crew.*         |
-        |              |              |            |
-   +----v-----+  +-----v-------+  +--v----+  +----v------+
-   |PostgreSQL |  | MongoDB     |  |Postgre|  | PostgreSQL|
-   | flight_db |  |turnaround_db|  |crew_db|  | ops_db    |
-   +----------+  +-------------+  +-------+  +----------+
+
+### Event Cascade
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant FS as Flight Service
+    participant RMQ as RabbitMQ
+    participant TS as Turnaround Service
+    participant CS as Crew Service
+    participant OH as Ops Hub
+
+    C->>FS: PATCH /flights/:id {status: arrived}
+    FS->>RMQ: publish flight.arrived
+
+    par Event fanout
+        RMQ->>TS: consume flight.arrived
+        TS->>TS: Create turnaround + tasks from aircraft template
+        TS->>RMQ: publish turnaround.started
+    and
+        RMQ->>OH: consume flight.arrived
+        OH->>OH: Log to event_log
+    end
+
+    RMQ->>CS: consume turnaround.started
+    CS->>CS: Auto-assign certified crew to tasks
+    CS->>RMQ: publish crew.assigned (per task)
+
+    par
+        RMQ->>TS: consume crew.assigned
+        TS->>TS: Update task with crew ID
+    and
+        RMQ->>OH: consume crew.assigned
+        OH->>OH: Log to event_log
+    end
+
+    Note over C,OH: Ground crew performs physical tasks...
+
+    C->>TS: PATCH /turnarounds/:id/tasks/:taskId {status: completed}
+    TS->>RMQ: publish turnaround.task.completed
+    RMQ->>CS: Free crew member for reassignment
+
+    Note over TS: When all tasks complete → turnaround.completed
 ```
 
 ### Services
