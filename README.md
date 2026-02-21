@@ -11,7 +11,7 @@ A polyglot microservice platform that simulates real-world **airport ground oper
 Most microservice tutorials use generic e-commerce (orders, products, carts). This project uses **Airport Turnaround Management** instead — based on the real [EUROCONTROL A-CDM](https://www.eurocontrol.int/concept/airport-collaborative-decision-making) framework — because the domain naturally demonstrates why microservices exist:
 
 - **Events cascade organically**: flight arrival &rarr; turnaround initialization &rarr; crew dispatch &rarr; task updates &rarr; delay alerts
-- **MongoDB is genuinely justified**: turnaround documents contain polymorphic embedded task arrays (fueling has liters, catering has meal counts, cargo has container IDs) — not forced into MongoDB for resume bullet points
+- **MongoDB is genuinely justified**: turnaround documents contain polymorphic embedded task arrays (fueling has liters, catering has meal counts, cargo has container IDs)
 - **The scheduler solves a real problem**: detecting delayed turnarounds, stuck tasks, and crew shortages before they cascade into flight delays
 - **Bounded contexts are clean**: each service owns its data and domain logic with no distributed transactions
 - **Authentic terminology**: IATA codes, TOBT (Target Off-Block Time), gate assignments, aircraft registration numbers
@@ -215,6 +215,188 @@ Turnaround documents contain **embedded task arrays** where each task type has d
 - Read the entire turnaround + all tasks in a single document fetch
 - Use the positional `$` operator for atomic embedded task updates
 - Store polymorphic metadata per task type without schema changes
+
+### Schema Diagrams
+
+> Diagrams omit auto-managed timestamp columns (`created_at`, `updated_at`) for clarity. In the Turnaround Service diagram, the `Task` entity is an embedded subdocument array inside the `Turnaround` document — not a separate collection.
+
+#### Flight Service — flight_db (PostgreSQL)
+
+```mermaid
+erDiagram
+    gates {
+        UUID id PK
+        VARCHAR gate_number UK
+        VARCHAR terminal
+        BOOLEAN is_active
+    }
+
+    flights {
+        UUID id PK
+        VARCHAR flight_number
+        VARCHAR airline_code
+        VARCHAR aircraft_reg
+        VARCHAR aircraft_type
+        VARCHAR origin_iata
+        VARCHAR destination_iata
+        TIMESTAMPTZ scheduled_arrival
+        TIMESTAMPTZ scheduled_departure
+        TIMESTAMPTZ actual_arrival
+        TIMESTAMPTZ actual_departure
+        UUID gate_id FK
+        VARCHAR status "scheduled | arrived | boarding | departed | cancelled | diverted"
+    }
+
+    gates ||--o{ flights : "assigned to"
+```
+
+#### Turnaround Service — turnaround_db (MongoDB)
+
+```mermaid
+erDiagram
+    turnarounds {
+        ObjectId _id PK
+        string flightId "indexed"
+        string flightNumber
+        string aircraftType
+        string aircraftReg
+        string gateId
+        string status "pending | in_progress | completed | delayed | cancelled"
+        number progressPercent
+        Date startedAt
+        Date completedAt
+    }
+
+    Task {
+        ObjectId _id PK
+        string name
+        string status "pending | in_progress | completed | blocked | skipped"
+        number estimatedDurationMinutes
+        string requiredCertification
+        number order
+        string assignedCrewId
+        Date startedAt
+        Date completedAt
+        string notes
+    }
+
+    turnarounds ||--o{ Task : "embeds tasks[]"
+```
+
+#### Crew Service — crew_db (PostgreSQL)
+
+```mermaid
+erDiagram
+    teams {
+        UUID id PK
+        VARCHAR name
+        VARCHAR terminal
+        UUID supervisor_id FK
+    }
+
+    crew_members {
+        UUID id PK
+        VARCHAR employee_id UK
+        VARCHAR first_name
+        VARCHAR last_name
+        VARCHAR email
+        VARCHAR phone
+        UUID team_id FK
+        BOOLEAN is_active
+    }
+
+    certifications {
+        UUID id PK
+        UUID crew_member_id FK
+        VARCHAR cert_type "fueling | cargo | pushback | marshalling | catering | cleaning | boarding"
+        DATE issued_date
+        DATE expiry_date
+        VARCHAR status "active | expired | suspended"
+    }
+
+    shifts {
+        UUID id PK
+        UUID crew_member_id FK
+        DATE shift_date
+        TIMESTAMPTZ start_time
+        TIMESTAMPTZ end_time
+        VARCHAR status "scheduled | active | completed | absent"
+    }
+
+    task_assignments {
+        UUID id PK
+        UUID crew_member_id FK
+        VARCHAR turnaround_id "MongoDB ObjectId"
+        VARCHAR task_id "MongoDB ObjectId"
+        VARCHAR task_type
+        VARCHAR status "assigned | active | completed | reassigned"
+    }
+
+    teams ||--o{ crew_members : "has members"
+    crew_members |o--o| teams : "supervises"
+    crew_members ||--o{ certifications : "holds"
+    crew_members ||--o{ shifts : "works"
+    crew_members ||--o{ task_assignments : "assigned to"
+```
+
+#### Ops Hub Service — ops_db (PostgreSQL)
+
+```mermaid
+erDiagram
+    alerts {
+        UUID id PK
+        VARCHAR alert_type "turnaround_delayed | task_stuck | crew_shortage | gate_conflict"
+        VARCHAR severity "info | warning | critical"
+        VARCHAR flight_id
+        VARCHAR turnaround_id
+        VARCHAR title
+        TEXT description
+        VARCHAR status "open | acknowledged | resolved | auto_resolved"
+        TIMESTAMPTZ resolved_at
+    }
+
+    event_log {
+        UUID id PK
+        VARCHAR event_type
+        VARCHAR source_service
+        JSONB payload "full event envelope"
+        TIMESTAMPTZ received_at
+    }
+```
+
+#### Cross-Service Data References
+
+No database-level foreign keys exist across services. References are soft — stored as plain strings (UUID or MongoDB ObjectId). Consistency is maintained through event-driven updates, not distributed transactions.
+
+```mermaid
+graph LR
+    subgraph flight_db["Flight DB (PostgreSQL)"]
+        F_flights["flights"]
+    end
+
+    subgraph turnaround_db["Turnaround DB (MongoDB)"]
+        T_turnarounds["turnarounds"]
+        T_tasks["turnarounds.tasks[]"]
+    end
+
+    subgraph crew_db["Crew DB (PostgreSQL)"]
+        C_crew["crew_members"]
+        C_certs["certifications"]
+        C_assignments["task_assignments"]
+    end
+
+    subgraph ops_db["Ops Hub DB (PostgreSQL)"]
+        O_alerts["alerts"]
+    end
+
+    T_turnarounds -. "flightId (string)" .-> F_flights
+    C_assignments -. "turnaround_id (string)" .-> T_turnarounds
+    C_assignments -. "task_id (string)" .-> T_tasks
+    T_tasks -. "requiredCertification (enum match)" .-> C_certs
+    T_tasks -. "assignedCrewId (string)" .-> C_crew
+    O_alerts -. "flight_id (string)" .-> F_flights
+    O_alerts -. "turnaround_id (string)" .-> T_turnarounds
+```
 
 ---
 
