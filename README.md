@@ -125,7 +125,9 @@ sequenceDiagram
 | **Flight Service** | Go | chi + sqlx | PostgreSQL | 8080 | Flight schedules, arrivals/departures, gate assignments |
 | **Turnaround Service** | TypeScript | NestJS + Mongoose | MongoDB | 3000 | Turnaround lifecycle, embedded task arrays, progress tracking |
 | **Crew Service** | Python | FastAPI + SQLAlchemy | PostgreSQL | 8000 | Crew management, certifications, shifts, auto-assignment |
-| **Ops Hub Service** | Rust | axum + sqlx | PostgreSQL | 8001 | Event audit log, alerts, scheduled delay/shortage detection |
+| **Ops Hub Service** | Rust | axum + sqlx | PostgreSQL | 8001 | Event audit log, alerts, scheduled delay/shortage detection, auth |
+| **Data Ingestion Service** | Python | FastAPI + httpx | — (stateless) | 8002 | Fetches real flight data from AviationStack API |
+| **Ops Dashboard** | TypeScript | React + Vite + Tailwind | — (static) | 5173 | Web UI for all services with RBAC (admin, ops_manager, crew, viewer) |
 
 ### Why 4 Languages?
 
@@ -433,7 +435,7 @@ All services use the same event envelope convention:
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose
-- ~4 GB free RAM (7 containers)
+- ~5 GB free RAM (9 containers)
 - `curl` and `jq` for testing scripts
 
 ### Quick Start
@@ -447,7 +449,7 @@ cd microservice-practice
 make up
 # or: docker compose up --build -d
 
-# Verify all 7 containers are healthy
+# Verify all 9 containers are healthy
 make ps
 ```
 
@@ -518,7 +520,9 @@ make rebuild       # Full rebuild
 | Flight Service | http://localhost:8080 | REST API + health |
 | Turnaround Service | http://localhost:3000 | REST API + health |
 | Crew Service | http://localhost:8000 | REST API + health |
-| Ops Hub Service | http://localhost:8001 | REST API + alerts + event log |
+| Ops Hub Service | http://localhost:8001 | REST API + alerts + event log + auth |
+| Data Ingestion Service | http://localhost:8002 | Flight data ingestion from AviationStack |
+| Ops Dashboard | http://localhost:5173 | Web UI (login: admin / admin) |
 | RabbitMQ Management | http://localhost:15672 | Login: guest / guest |
 | PostgreSQL | localhost:5432 | User: postgres / postgres |
 | MongoDB | localhost:27017 | No auth |
@@ -574,6 +578,31 @@ make rebuild       # Full rebuild
 | GET | `/api/alerts/:id` | Get alert by ID |
 | PATCH | `/api/alerts/:id` | Update alert status |
 | GET | `/api/events` | Event audit log (`?event_type=&source_service=&limit=&offset=`) |
+| POST | `/auth/login` | Authenticate user, returns JWT |
+| GET | `/auth/me` | Get current user from JWT |
+| POST | `/auth/register` | Register new user (admin only) |
+| GET | `/api/users` | List users (admin only) |
+
+### Data Ingestion Service (Python) — :8002
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/api/ingest/trigger` | Manually trigger a data ingestion cycle |
+| GET | `/api/ingest/status` | Last run info (flights ingested, errors, timestamps) |
+| GET | `/api/ingest/config` | Current ingestion config (airport, interval, API key status) |
+| PATCH | `/api/ingest/config` | Update target airport or poll interval at runtime |
+
+### Ops Dashboard (React) — :5173
+
+| View | Description |
+|------|-------------|
+| Overview | KPI cards, turnaround donut chart, upcoming arrivals, event feed |
+| Flights | Sortable/filterable flight table with status badges, ingest trigger |
+| Turnarounds | Progress bars, expandable Gantt-style task timelines |
+| Crew | Roster with certification badges, availability indicators |
+| Events & Alerts | Event log table, alert cards with resolve actions |
+| Settings | Ingestion config, system health, user management (admin only) |
 
 ---
 
@@ -581,7 +610,7 @@ make rebuild       # Full rebuild
 
 ```
 microservice-practice/
-├── docker-compose.yml          # All 7 containers orchestrated
+├── docker-compose.yml          # All 9 containers orchestrated
 ├── Makefile                    # Developer convenience commands
 ├── docs/
 │   ├── hld.md                  # High-level design with Mermaid diagrams
@@ -596,7 +625,9 @@ microservice-practice/
     ├── flight-service/         # Go (chi + sqlx + slog)
     ├── turnaround-service/     # TypeScript (NestJS + Mongoose)
     ├── crew-service/           # Python (FastAPI + SQLAlchemy + aio-pika)
-    └── ops-hub-service/        # Rust (axum + sqlx + lapin + tokio-cron)
+    ├── ops-hub-service/        # Rust (axum + sqlx + lapin + tokio-cron)
+    ├── data-ingestion-service/ # Python (FastAPI + httpx + APScheduler)
+    └── dashboard/              # React (Vite + Tailwind + Recharts)
 ```
 
 ---

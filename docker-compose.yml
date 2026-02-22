@@ -138,6 +138,43 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  data-ingestion-service:
+    build:
+      context: ./services/data-ingestion-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      FLIGHT_SERVICE_URL: http://flight-service:8080
+      AVIATIONSTACK_API_KEY: ${AVIATIONSTACK_API_KEY:-}
+      TARGET_AIRPORT: DXB
+      POLL_INTERVAL_MINUTES: "30"
+    depends_on:
+      flight-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      flight-service:
+        condition: service_healthy
+      turnaround-service:
+        condition: service_healthy
+      crew-service:
+        condition: service_healthy
+      ops-hub-service:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   mongodb_data:

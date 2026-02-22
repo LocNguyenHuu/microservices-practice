@@ -46,3 +46,9 @@ test-flow: ## Run end-to-end flow test
 
 rabbitmq-ui: ## Open RabbitMQ management UI
 	open http://localhost:15672
+
+dashboard: ## Open the Ops Dashboard
+	open http://localhost:5173
+
+ingest: ## Trigger a manual data ingestion
+	curl -s -X POST http://localhost:8002/api/ingest/trigger | python3 -m json.tool

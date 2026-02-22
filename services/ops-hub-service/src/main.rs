@@ -67,6 +67,10 @@ async fn main() {
             routing::patch(handlers::alerts::update_alert),
         )
         .route("/api/events", routing::get(handlers::events::list_events))
+        .route("/auth/login", routing::post(handlers::auth::login))
+        .route("/auth/me", routing::get(handlers::auth::me))
+        .route("/auth/register", routing::post(handlers::auth::register))
+        .route("/api/users", routing::get(handlers::auth::list_users))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state((*pool).clone());
