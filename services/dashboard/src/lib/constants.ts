@@ -25,6 +25,12 @@ export const STATUS_COLORS: Record<string, string> = {
   warning: "bg-status-amber text-black",
   critical: "bg-status-red text-white",
 
+  // Equipment statuses
+  available: "bg-status-green text-white",
+  in_use: "bg-status-blue text-white",
+  maintenance: "bg-status-amber text-black",
+  out_of_service: "bg-status-red text-white",
+
   // Generic
   active: "bg-status-green text-white",
   open: "bg-status-red text-white",

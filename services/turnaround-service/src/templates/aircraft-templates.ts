@@ -6,47 +6,52 @@ export interface TaskTemplate {
   name: string;
   estimatedDurationMinutes: number;
   requiredCertification?: string;
+  requiredEquipment?: string;
   order: number;
 }
 
 // Wide-body turnaround: 7 tasks including cargo operations
 const WIDE_BODY_TASKS: TaskTemplate[] = [
-  { name: 'deboarding', estimatedDurationMinutes: 45, order: 1 },
+  { name: 'deboarding', estimatedDurationMinutes: 45, requiredEquipment: 'gpu', order: 1 },
   {
     name: 'fueling',
     estimatedDurationMinutes: 60,
     requiredCertification: 'fueling',
+    requiredEquipment: 'fuel_truck',
     order: 2,
   },
-  { name: 'catering', estimatedDurationMinutes: 40, requiredCertification: 'catering', order: 3 },
+  { name: 'catering', estimatedDurationMinutes: 40, requiredCertification: 'catering', requiredEquipment: 'catering_truck', order: 3 },
   { name: 'cabin_cleaning', estimatedDurationMinutes: 50, requiredCertification: 'cleaning', order: 4 },
   {
     name: 'cargo_unload',
     estimatedDurationMinutes: 55,
     requiredCertification: 'cargo',
+    requiredEquipment: 'belt_loader',
     order: 5,
   },
   {
     name: 'cargo_load',
     estimatedDurationMinutes: 55,
     requiredCertification: 'cargo',
+    requiredEquipment: 'belt_loader',
     order: 6,
   },
-  { name: 'boarding', estimatedDurationMinutes: 50, requiredCertification: 'boarding', order: 7 },
+  { name: 'boarding', estimatedDurationMinutes: 50, requiredCertification: 'boarding', requiredEquipment: 'gpu', order: 7 },
 ];
 
 // Narrow-body turnaround: 5 tasks, no cargo handling
 const NARROW_BODY_TASKS: TaskTemplate[] = [
-  { name: 'deboarding', estimatedDurationMinutes: 20, order: 1 },
+  { name: 'deboarding', estimatedDurationMinutes: 20, requiredEquipment: 'gpu', order: 1 },
   {
     name: 'fueling',
     estimatedDurationMinutes: 30,
     requiredCertification: 'fueling',
+    requiredEquipment: 'fuel_truck',
     order: 2,
   },
-  { name: 'catering', estimatedDurationMinutes: 20, requiredCertification: 'catering', order: 3 },
+  { name: 'catering', estimatedDurationMinutes: 20, requiredCertification: 'catering', requiredEquipment: 'catering_truck', order: 3 },
   { name: 'cabin_cleaning', estimatedDurationMinutes: 25, requiredCertification: 'cleaning', order: 4 },
-  { name: 'boarding', estimatedDurationMinutes: 25, requiredCertification: 'boarding', order: 5 },
+  { name: 'boarding', estimatedDurationMinutes: 25, requiredCertification: 'boarding', requiredEquipment: 'gpu', order: 5 },
 ];
 
 // Scale task durations by a factor (aircraft size differences)

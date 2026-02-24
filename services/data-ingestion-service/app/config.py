@@ -7,9 +7,12 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     flight_service_url: str = "http://localhost:8080"
+    turnaround_service_url: str = "http://localhost:3000"
     aviationstack_api_key: str = ""
+    checkwx_api_key: str = ""
     target_airport: str = "DXB"
     poll_interval_minutes: int = 30
+    weather_poll_interval_minutes: int = 15
     port: int = 8002
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

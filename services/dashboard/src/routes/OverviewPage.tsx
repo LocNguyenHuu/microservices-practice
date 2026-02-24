@@ -1,5 +1,6 @@
 import { KpiCard } from "@/components/ui/KpiCard"
 import { StatusBadge } from "@/components/ui/StatusBadge"
+import { WeatherWidget } from "@/components/WeatherWidget"
 import { useFlights, useUpcomingArrivals } from "@/hooks/useFlights"
 import { useTurnarounds } from "@/hooks/useTurnarounds"
 import { useCrew } from "@/hooks/useCrew"
@@ -54,6 +55,9 @@ export function OverviewPage() {
         <KpiCard title="Crew On Duty" value={crewOnDuty} icon={<Users size={18} />} />
         <KpiCard title="Open Alerts" value={openAlerts} icon={<Bell size={18} />} />
       </div>
+
+      {/* Weather Widget */}
+      <WeatherWidget />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Turnaround Status Chart */}

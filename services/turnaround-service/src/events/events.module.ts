@@ -3,13 +3,14 @@ import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { FlightEventConsumer } from './flight-event.consumer';
 import { CrewEventConsumer } from './crew-event.consumer';
+import { EquipmentEventConsumer } from './equipment-event.consumer';
 import { TurnaroundEventPublisher } from './turnaround-event.publisher';
 import { TurnaroundModule } from '../turnaround/turnaround.module';
 
 @Module({
   imports: [
     // RabbitMQ connection with topic exchange declarations.
-    // Both exchanges are declared as durable so they survive broker restarts.
+    // All exchanges are declared as durable so they survive broker restarts.
     RabbitMQModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -23,6 +24,7 @@ import { TurnaroundModule } from '../turnaround/turnaround.module';
             options: { durable: true },
           },
           { name: 'crew.events', type: 'topic', options: { durable: true } },
+          { name: 'equipment.events', type: 'topic', options: { durable: true } },
         ],
         connectionInitOptions: { wait: true, timeout: 30000 },
         channels: {
@@ -35,7 +37,12 @@ import { TurnaroundModule } from '../turnaround/turnaround.module';
     // TurnaroundModule needs TurnaroundEventPublisher (via service).
     forwardRef(() => TurnaroundModule),
   ],
-  providers: [FlightEventConsumer, CrewEventConsumer, TurnaroundEventPublisher],
+  providers: [
+    FlightEventConsumer,
+    CrewEventConsumer,
+    EquipmentEventConsumer,
+    TurnaroundEventPublisher,
+  ],
   exports: [TurnaroundEventPublisher],
 })
 export class EventsModule {}

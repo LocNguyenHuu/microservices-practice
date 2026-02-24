@@ -12,6 +12,7 @@ use lapin::{
 };
 use sqlx::PgPool;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 const QUEUE_NAME: &str = "ops-hub-all-queue";
 
@@ -20,6 +21,7 @@ const EXCHANGES: &[(&str, &str)] = &[
     ("flight.events", "flight.#"),
     ("turnaround.events", "turnaround.#"),
     ("crew.events", "crew.#"),
+    ("equipment.events", "equipment.#"),
 ];
 
 // Derives the source service name from an event type prefix.
@@ -29,6 +31,7 @@ fn source_service_from_event_type(event_type: &str) -> &str {
         Some("flight") => "flight-service",
         Some("turnaround") => "turnaround-service",
         Some("crew") => "crew-service",
+        Some("equipment") => "crew-service",
         _ => "unknown",
     }
 }
@@ -97,7 +100,7 @@ async fn setup_channel(channel: &Channel) -> Result<(), lapin::Error> {
 
 // Starts the event consumer as a background task. Logs every received
 // event into the event_log table and ACKs the message.
-pub async fn start_consumer(rabbitmq_url: String, pool: Arc<PgPool>) {
+pub async fn start_consumer(rabbitmq_url: String, pool: Arc<PgPool>, broadcast_tx: broadcast::Sender<String>) {
     let conn = match connect_with_retry(&rabbitmq_url).await {
         Ok(c) => c,
         Err(e) => {
@@ -152,6 +155,10 @@ pub async fn start_consumer(rabbitmq_url: String, pool: Arc<PgPool>) {
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
                         let source = source_service_from_event_type(event_type);
+                        let correlation_id = payload
+                            .get("correlationId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         // Insert into event_log
                         if let Err(e) = sqlx::query(
@@ -163,14 +170,28 @@ pub async fn start_consumer(rabbitmq_url: String, pool: Arc<PgPool>) {
                         .execute(pool.as_ref())
                         .await
                         {
-                            tracing::error!("Failed to log event {event_type}: {e}");
+                            tracing::error!(
+                                event_type = event_type,
+                                correlation_id = correlation_id,
+                                "Failed to log event: {e}"
+                            );
                         } else {
                             tracing::info!(
                                 event_type = event_type,
                                 source = source,
+                                correlation_id = correlation_id,
                                 "Event logged"
                             );
                         }
+
+                        // Broadcast to SSE clients
+                        let sse_payload = serde_json::json!({
+                            "event_type": event_type,
+                            "source_service": source,
+                            "payload": &payload,
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        });
+                        let _ = broadcast_tx.send(sse_payload.to_string());
                     }
                     Err(e) => {
                         tracing::warn!("Failed to parse event payload: {e}");

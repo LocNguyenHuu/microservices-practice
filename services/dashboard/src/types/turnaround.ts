@@ -1,3 +1,13 @@
+export interface Milestones {
+  eibt?: string
+  aibt?: string
+  tobt?: string
+  tsat?: string
+  ardt?: string
+  aobt?: string
+  atot?: string
+}
+
 export interface Turnaround {
   _id: string
   flightId: string
@@ -10,6 +20,7 @@ export interface Turnaround {
   startedAt?: string
   completedAt?: string
   progressPercent: number
+  milestones?: Milestones
   createdAt: string
   updatedAt: string
 }
@@ -20,8 +31,10 @@ export interface Task {
   status: TaskStatus
   estimatedDurationMinutes: number
   requiredCertification?: string
+  requiredEquipment?: string
   order: number
   assignedCrewId?: string
+  assignedEquipmentId?: string
   startedAt?: string
   completedAt?: string
   notes?: string

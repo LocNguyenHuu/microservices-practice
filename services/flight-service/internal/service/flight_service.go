@@ -18,12 +18,13 @@ import (
 // FlightService implements the core business logic for flight operations.
 type FlightService struct {
 	repo      *repository.FlightRepository
+	gateRepo  *repository.GateRepository
 	publisher event.Publisher
 }
 
 // NewFlightService creates a new service with the given repository and event publisher.
-func NewFlightService(repo *repository.FlightRepository, publisher event.Publisher) *FlightService {
-	return &FlightService{repo: repo, publisher: publisher}
+func NewFlightService(repo *repository.FlightRepository, gateRepo *repository.GateRepository, publisher event.Publisher) *FlightService {
+	return &FlightService{repo: repo, gateRepo: gateRepo, publisher: publisher}
 }
 
 // CreateFlight validates the request, persists a new flight, and returns it.
@@ -151,7 +152,7 @@ func (s *FlightService) publishStatusEvents(before, after *model.Flight, req mod
 		)
 	}
 
-	// Gate changed → publish gate change event
+	// Gate changed → publish gate change event + check for conflicts
 	if req.GateID != nil && (before.GateID == nil || *req.GateID != *before.GateID) {
 		payload := map[string]any{
 			"old_gate_id": before.GateID,
@@ -169,6 +170,41 @@ func (s *FlightService) publishStatusEvents(before, after *model.Flight, req mod
 			"flight_id", after.ID,
 			"flight_number", after.FlightNumber,
 			"new_gate_id", after.GateID,
+		)
+
+		// Check for gate conflicts
+		s.checkGateConflicts(after)
+	}
+}
+
+// checkGateConflicts detects overlapping gate assignments and publishes conflict events.
+func (s *FlightService) checkGateConflicts(flight *model.Flight) {
+	if flight.GateID == nil || s.gateRepo == nil {
+		return
+	}
+
+	conflicts, err := s.gateRepo.FindConflictingFlights(
+		context.Background(), *flight.GateID, flight.ID,
+		flight.ScheduledArrival, flight.ScheduledDeparture,
+	)
+	if err != nil {
+		slog.Error("failed to check gate conflicts", "error", err)
+		return
+	}
+
+	for _, conflicting := range conflicts {
+		payload := map[string]any{
+			"flight":            flight,
+			"conflicting_flight": conflicting,
+			"gate_id":           flight.GateID,
+		}
+		if err := s.publisher.Publish(event.FlightGateConflict, flight.ID, payload); err != nil {
+			slog.Error("failed to publish gate conflict event", "error", err)
+		}
+		slog.Warn("gate conflict detected",
+			"flight", flight.FlightNumber,
+			"conflicting_flight", conflicting.FlightNumber,
+			"gate_id", flight.GateID,
 		)
 	}
 }

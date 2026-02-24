@@ -1,11 +1,13 @@
 import { useAuth } from "@/contexts/AuthContext"
+import { useSSE } from "@/contexts/SSEContext"
 import { useAlerts } from "@/hooks/useEvents"
 import { StatusBadge } from "@/components/ui/StatusBadge"
-import { Bell, LogOut, Plane } from "lucide-react"
+import { Bell, LogOut, Plane, Radio } from "lucide-react"
 import { useState, useEffect } from "react"
 
 export function TopBar() {
   const { user, logout } = useAuth()
+  const { connected } = useSSE()
   const { data: alerts } = useAlerts("open")
   const [utcTime, setUtcTime] = useState(getUTC())
 
@@ -24,6 +26,11 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-5">
+        <div className="flex items-center gap-1.5">
+          <Radio size={14} className={connected ? "text-status-green" : "text-status-red"} />
+          <span className="text-xs text-muted-foreground">{connected ? "LIVE" : "OFFLINE"}</span>
+        </div>
+
         <span className="font-mono text-sm text-muted-foreground">
           UTC {utcTime}
         </span>

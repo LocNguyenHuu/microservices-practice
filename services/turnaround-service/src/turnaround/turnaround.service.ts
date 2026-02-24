@@ -10,12 +10,15 @@ import {
 import { TaskStatus } from './schemas/task.schema';
 import { CreateTurnaroundDto } from './dto/create-turnaround.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { UpdateMilestonesDto } from './dto/update-milestones.dto';
 import { getTasksForAircraft } from '../templates/aircraft-templates';
 import { TurnaroundEventPublisher } from '../events/turnaround-event.publisher';
+import { WeatherService } from '../weather/weather.service';
 
 // TurnaroundService orchestrates between the repository, aircraft templates,
-// and event publishing. It enforces domain rules like idempotent creation,
-// automatic progress tracking, and event publishing on state changes.
+// weather-based task injection, and event publishing. It enforces domain rules
+// like idempotent creation, automatic progress tracking, weather-dependent
+// de-icing injection, and event publishing on state changes.
 @Injectable()
 export class TurnaroundService {
   private readonly logger = new Logger(TurnaroundService.name);
@@ -23,6 +26,7 @@ export class TurnaroundService {
   constructor(
     private readonly repo: TurnaroundRepository,
     private readonly eventPublisher: TurnaroundEventPublisher,
+    private readonly weatherService: WeatherService,
   ) {}
 
   // Creates a turnaround with tasks generated from the aircraft type template.
@@ -41,14 +45,54 @@ export class TurnaroundService {
 
     // Generate tasks from aircraft template
     const taskTemplates = getTasksForAircraft(dto.aircraftType);
+
+    // Check weather conditions for de-icing and LVP adjustments
+    const deIcingRequired = await this.weatherService.isDeIcingRequired();
+    const durationFactor = await this.weatherService.getDurationFactor();
+
     const tasks = taskTemplates.map((t) => ({
       name: t.name,
       status: TaskStatus.PENDING,
-      estimatedDurationMinutes: t.estimatedDurationMinutes,
+      estimatedDurationMinutes: Math.round(
+        t.estimatedDurationMinutes * durationFactor,
+      ),
       requiredCertification: t.requiredCertification,
+      requiredEquipment: t.requiredEquipment,
       order: t.order,
     }));
 
+    // Inject de-icing task before boarding if icing conditions detected
+    if (deIcingRequired) {
+      const maxOrder = Math.max(...tasks.map((t) => t.order));
+      const deIcingTask = this.weatherService.getDeIcingTask(maxOrder);
+      // Insert de-icing just before the last task (boarding)
+      const boardingTask = tasks.find((t) => t.name === 'boarding');
+      if (boardingTask) {
+        deIcingTask.order = boardingTask.order;
+        boardingTask.order += 1;
+      }
+      tasks.push({
+        name: deIcingTask.name,
+        status: TaskStatus.PENDING,
+        estimatedDurationMinutes: deIcingTask.estimatedDurationMinutes,
+        requiredCertification: deIcingTask.requiredCertification,
+        requiredEquipment: deIcingTask.requiredEquipment,
+        order: deIcingTask.order,
+      });
+      tasks.sort((a, b) => a.order - b.order);
+      this.logger.log(
+        `De-icing task injected for flight ${dto.flightNumber} ` +
+          `(${deIcingTask.estimatedDurationMinutes}min holdover)`,
+      );
+    }
+
+    if (durationFactor > 1) {
+      this.logger.log(
+        `LVP active — task durations scaled by ${durationFactor}x for ${dto.flightNumber}`,
+      );
+    }
+
+    const now = new Date();
     const turnaround = await this.repo.create({
       flightId: dto.flightId,
       flightNumber: dto.flightNumber,
@@ -57,13 +101,16 @@ export class TurnaroundService {
       gateId: dto.gateId,
       status: TurnaroundStatus.IN_PROGRESS,
       tasks: tasks as never,
-      startedAt: new Date(),
+      startedAt: now,
       progressPercent: 0,
+      milestones: { aibt: now },
     });
 
     this.logger.log(
       `Turnaround created: ${turnaround.id} for flight ${dto.flightNumber} ` +
-        `(${dto.aircraftType}, ${tasks.length} tasks)`,
+        `(${dto.aircraftType}, ${tasks.length} tasks` +
+        `${deIcingRequired ? ', DE-ICING' : ''}` +
+        `${durationFactor > 1 ? ', LVP' : ''})`,
     );
 
     await this.eventPublisher.publishTurnaroundStarted(turnaround);
@@ -120,6 +167,8 @@ export class TurnaroundService {
     if (dto.notes !== undefined) updates.notes = dto.notes;
     if (dto.assignedCrewId !== undefined)
       updates.assignedCrewId = dto.assignedCrewId;
+    if (dto.assignedEquipmentId !== undefined)
+      updates.assignedEquipmentId = dto.assignedEquipmentId;
 
     const updated = await this.repo.updateTask(turnaroundId, taskId, updates);
     if (!updated) {
@@ -149,10 +198,12 @@ export class TurnaroundService {
 
     // Auto-complete turnaround when all tasks are done
     if (completedCount === updated.tasks.length) {
+      const ardt = new Date();
+      await this.repo.updateMilestones(turnaroundId, { ardt });
       const completed = await this.repo.updateStatus(
         turnaroundId,
         TurnaroundStatus.COMPLETED,
-        { completedAt: new Date(), progressPercent: 100 },
+        { completedAt: ardt, progressPercent: 100 },
       );
       if (completed) {
         this.logger.log(
@@ -163,5 +214,48 @@ export class TurnaroundService {
     }
 
     return this.getTurnaround(turnaroundId);
+  }
+
+  // Updates A-CDM milestones with validation (TSAT >= TOBT, AOBT >= TSAT).
+  async updateMilestones(
+    turnaroundId: string,
+    dto: UpdateMilestonesDto,
+  ): Promise<TurnaroundDocument> {
+    const turnaround = await this.repo.findById(turnaroundId);
+    if (!turnaround) {
+      throw new NotFoundException(`Turnaround ${turnaroundId} not found`);
+    }
+
+    const milestones: Record<string, Date> = {};
+    const existing = turnaround.milestones || {};
+
+    for (const [key, value] of Object.entries(dto)) {
+      if (value) milestones[key] = new Date(value);
+    }
+
+    // Validation: TSAT must be >= TOBT
+    const tobt = milestones.tobt || existing.tobt;
+    const tsat = milestones.tsat || existing.tsat;
+    if (tobt && tsat && tsat < tobt) {
+      throw new NotFoundException('TSAT must be >= TOBT');
+    }
+
+    // Validation: AOBT must be >= TSAT
+    const aobt = milestones.aobt || existing.aobt;
+    if (aobt && tsat && aobt < tsat) {
+      throw new NotFoundException('AOBT must be >= TSAT');
+    }
+
+    const updated = await this.repo.updateMilestones(turnaroundId, milestones);
+    if (!updated) {
+      throw new NotFoundException('Failed to update milestones');
+    }
+
+    this.logger.log(
+      `Milestones updated for turnaround ${turnaroundId}: ${Object.keys(milestones).join(', ')}`,
+    );
+
+    await this.eventPublisher.publishMilestoneUpdated(updated, Object.keys(milestones));
+    return updated;
   }
 }

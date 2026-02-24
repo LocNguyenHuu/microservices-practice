@@ -11,7 +11,7 @@ mod handlers;
 mod models;
 mod scheduler;
 
-use axum::{routing, Router};
+use axum::{routing, Extension, Router};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -40,11 +40,15 @@ async fn main() {
 
     let pool = Arc::new(pool);
 
+    // SSE broadcast channel — events flow from RabbitMQ consumer to all connected dashboard clients
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(256);
+
     // Start RabbitMQ event consumer as background task
     let consumer_pool = pool.clone();
+    let consumer_tx = broadcast_tx.clone();
     let rabbitmq_url = config.rabbitmq_url.clone();
     tokio::spawn(async move {
-        events::consumer::start_consumer(rabbitmq_url, consumer_pool).await;
+        events::consumer::start_consumer(rabbitmq_url, consumer_pool, consumer_tx).await;
     });
 
     // Start scheduler jobs as background task
@@ -67,10 +71,15 @@ async fn main() {
             routing::patch(handlers::alerts::update_alert),
         )
         .route("/api/events", routing::get(handlers::events::list_events))
+        .route(
+            "/api/events/stream",
+            routing::get(handlers::sse::event_stream),
+        )
         .route("/auth/login", routing::post(handlers::auth::login))
         .route("/auth/me", routing::get(handlers::auth::me))
         .route("/auth/register", routing::post(handlers::auth::register))
         .route("/api/users", routing::get(handlers::auth::list_users))
+        .layer(Extension(broadcast_tx))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state((*pool).clone());

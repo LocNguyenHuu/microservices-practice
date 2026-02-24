@@ -24,7 +24,7 @@ config.set_main_option("sqlalchemy.url", sync_url)
 
 # Import all models so Alembic can detect them
 from app.database import Base
-from app.models import Team, CrewMember, Certification, Shift, TaskAssignment  # noqa: F401
+from app.models import Team, CrewMember, Certification, Shift, TaskAssignment, Equipment, EquipmentAssignment  # noqa: F401
 
 target_metadata = Base.metadata
 

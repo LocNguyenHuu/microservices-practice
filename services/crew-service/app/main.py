@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from .config import settings
 from .events.consumer import EventConsumer
 from .events.publisher import EventPublisher
-from .routers import health, crew_members, certifications, shifts, assignments
+from .routers import health, crew_members, certifications, shifts, assignments, equipment
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,3 +62,4 @@ app.include_router(crew_members.router)
 app.include_router(certifications.router)
 app.include_router(shifts.router)
 app.include_router(assignments.router)
+app.include_router(equipment.router)

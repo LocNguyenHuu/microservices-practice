@@ -85,4 +85,17 @@ export class TurnaroundRepository {
       .findByIdAndUpdate(id, { $set: { status, ...extra } }, { new: true })
       .exec();
   }
+
+  async updateMilestones(
+    id: string,
+    milestones: Record<string, Date>,
+  ): Promise<TurnaroundDocument | null> {
+    const setFields: Record<string, Date> = {};
+    for (const [key, value] of Object.entries(milestones)) {
+      setFields[`milestones.${key}`] = value;
+    }
+    return this.turnaroundModel
+      .findByIdAndUpdate(id, { $set: setFields }, { new: true })
+      .exec();
+  }
 }

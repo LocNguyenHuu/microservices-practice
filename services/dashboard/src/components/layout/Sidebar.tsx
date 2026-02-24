@@ -10,6 +10,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  GanttChart,
+  Wrench,
 } from "lucide-react"
 import { useState } from "react"
 
@@ -17,6 +19,8 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Overview", roles: null },
   { to: "/flights", icon: Plane, label: "Flights", roles: null },
   { to: "/turnarounds", icon: RefreshCw, label: "Turnarounds", roles: null },
+  { to: "/stand-plan", icon: GanttChart, label: "Stand Plan", roles: null },
+  { to: "/equipment", icon: Wrench, label: "Equipment", roles: null },
   { to: "/crew", icon: Users, label: "Crew", roles: ["admin", "ops_manager", "crew_supervisor", "viewer"] as string[] },
   { to: "/events", icon: ScrollText, label: "Events", roles: ["admin", "ops_manager", "crew_supervisor", "viewer"] as string[] },
   { to: "/settings", icon: Settings, label: "Settings", roles: ["admin"] as string[] },

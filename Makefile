@@ -1,21 +1,44 @@
-.PHONY: up down rebuild logs ps test-flight test-turnaround test-crew test-ops-hub seed test-flow help clean rabbitmq-ui
+.PHONY: up down rebuild logs ps test-flight test-turnaround test-crew test-ops-hub seed test-flow help clean rabbitmq-ui up-core up-flight up-ops demo
 
 help: ## Show available commands
 	@echo "SkyTurn — Airport Turnaround Operations Platform"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start all services
-	docker compose up --build -d
+# ── Startup Profiles ──────────────────────────────────────────────
+
+up: ## Start all services (full stack)
+	docker compose --profile full up --build -d
+
+up-core: ## Start infrastructure only (Postgres, RabbitMQ, MongoDB)
+	docker compose --profile core up --build -d
+
+up-flight: ## Start infra + Flight Service
+	docker compose --profile flight up --build -d
+
+up-ops: ## Start core operational services (no dashboard/ingestion)
+	docker compose --profile ops up --build -d
+
+demo: ## Full stack + seed data + open dashboard
+	docker compose --profile full up --build -d
+	@echo "Waiting for services to be healthy..."
+	@sleep 15
+	./scripts/seed-data.sh
+	@echo "Opening dashboard..."
+	open http://localhost:5173
+
+# ── Lifecycle ─────────────────────────────────────────────────────
 
 down: ## Stop all services
-	docker compose down
+	docker compose --profile full down
 
 rebuild: ## Rebuild and restart all services
-	docker compose down && docker compose up --build -d
+	docker compose --profile full down && docker compose --profile full up --build -d
 
 clean: ## Stop services and remove all data volumes
-	docker compose down -v
+	docker compose --profile full down -v
+
+# ── Logs & Status ─────────────────────────────────────────────────
 
 logs: ## Show logs for all services
 	docker compose logs -f
@@ -25,6 +48,11 @@ logs-%: ## Show logs for a specific service (e.g. make logs-flight-service)
 
 ps: ## Show running containers
 	docker compose ps
+
+stats: ## Show container resource usage
+	docker stats --no-stream
+
+# ── Testing ───────────────────────────────────────────────────────
 
 test-flight: ## Run flight-service unit tests
 	cd services/flight-service && go test ./...
@@ -37,6 +65,8 @@ test-crew: ## Run crew-service unit tests
 
 test-ops-hub: ## Run ops-hub-service unit tests
 	cd services/ops-hub-service && cargo test
+
+# ── Data & Tools ──────────────────────────────────────────────────
 
 seed: ## Seed test flight data
 	./scripts/seed-data.sh

@@ -1,5 +1,6 @@
 # Data Ingestion Service — fetches real flight data from AviationStack API
 # and creates flights in the Flight Service via REST API.
+# Also fetches METAR weather data for the target airport.
 #
 # Uses APScheduler for periodic ingestion and exposes a REST API for
 # manual triggers, status checks, and runtime configuration updates.
@@ -11,8 +12,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from .config import settings
-from .routers import health, ingest
+from .routers import health, ingest, weather
 from .services.ingestion import run_ingestion
+from .services.weather import run_weather_update
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +35,14 @@ async def scheduled_ingestion():
         logger.error("Scheduled ingestion failed: %s", e)
 
 
+async def scheduled_weather():
+    """Wrapper for scheduled weather update."""
+    try:
+        await run_weather_update()
+    except Exception as e:
+        logger.error("Scheduled weather update failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start/stop the APScheduler across the application lifecycle."""
@@ -44,20 +54,38 @@ async def lifespan(app: FastAPI):
             id="flight_ingestion",
             replace_existing=True,
         )
-        scheduler.start()
         logger.info(
-            "Scheduler started — ingesting %s flights every %d minutes",
+            "Flight ingestion scheduled — %s every %d minutes",
             settings.target_airport,
             settings.poll_interval_minutes,
         )
-        # Update status to reflect scheduler is active
         from .services.ingestion import _status
         _status.scheduler_active = True
     else:
         logger.warning(
-            "No AVIATIONSTACK_API_KEY configured — scheduler disabled. "
-            "Set the env var or use POST /api/ingest/trigger after configuring."
+            "No AVIATIONSTACK_API_KEY configured — flight ingestion disabled."
         )
+
+    # Weather scheduler — always active (uses simulated data if no API key)
+    scheduler.add_job(
+        scheduled_weather,
+        "interval",
+        minutes=settings.weather_poll_interval_minutes,
+        id="weather_update",
+        replace_existing=True,
+    )
+    from .services.weather import _status as weather_status
+    weather_status.scheduler_active = True
+    logger.info(
+        "Weather scheduler active — updating every %d minutes%s",
+        settings.weather_poll_interval_minutes,
+        " (live METAR)" if settings.checkwx_api_key else " (simulated)",
+    )
+
+    scheduler.start()
+
+    # Run initial weather fetch on startup
+    await scheduled_weather()
 
     yield
 
@@ -68,10 +96,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SkyTurn Data Ingestion Service",
-    description="Fetches real flight data from aviation APIs into the Flight Service",
+    description="Fetches real flight data and weather from aviation APIs",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 app.include_router(health.router)
 app.include_router(ingest.router)
+app.include_router(weather.router)

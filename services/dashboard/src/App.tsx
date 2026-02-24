@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AuthProvider, useAuth } from "@/contexts/AuthContext"
+import { SSEProvider } from "@/contexts/SSEContext"
 import { AppLayout } from "@/components/layout/AppLayout"
 import { ProtectedRoute } from "@/routes/ProtectedRoute"
 import { LoginPage } from "@/routes/LoginPage"
@@ -10,6 +11,8 @@ import { TurnaroundsPage } from "@/routes/TurnaroundsPage"
 import { CrewPage } from "@/routes/CrewPage"
 import { EventsPage } from "@/routes/EventsPage"
 import { SettingsPage } from "@/routes/SettingsPage"
+import { StandPlanPage } from "@/routes/StandPlanPage"
+import { EquipmentPage } from "@/routes/EquipmentPage"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +42,8 @@ function AppRoutes() {
         <Route index element={<OverviewPage />} />
         <Route path="flights" element={<FlightsPage />} />
         <Route path="turnarounds" element={<TurnaroundsPage />} />
+        <Route path="stand-plan" element={<StandPlanPage />} />
+        <Route path="equipment" element={<EquipmentPage />} />
         <Route
           path="crew"
           element={
@@ -74,7 +79,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
+          <SSEProvider>
+            <AppRoutes />
+          </SSEProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
