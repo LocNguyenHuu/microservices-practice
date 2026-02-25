@@ -4,12 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { TurnaroundDocument } from '../turnaround/schemas/turnaround.schema';
 
 // Event envelope matches the Go FlightEvent pattern:
-// { id, type, turnaround_id, flight_id, timestamp, data }
+// { id, type, turnaround_id, flight_id, correlationId, timestamp, data }
 interface TurnaroundEvent {
   id: string;
   type: string;
   turnaround_id: string;
   flight_id: string;
+  correlationId: string;
   timestamp: string;
   data: Record<string, unknown>;
 }
@@ -82,17 +83,37 @@ export class TurnaroundEventPublisher {
     );
   }
 
+  async publishMilestoneUpdated(
+    turnaround: TurnaroundDocument,
+    updatedFields: string[],
+  ): Promise<void> {
+    await this.publish(
+      'turnaround.milestone.updated',
+      turnaround.id as string,
+      turnaround.flightId,
+      {
+        turnaround_id: turnaround.id,
+        flight_id: turnaround.flightId,
+        flight_number: turnaround.flightNumber,
+        updated_milestones: updatedFields,
+        milestones: turnaround.milestones,
+      },
+    );
+  }
+
   private async publish(
     routingKey: string,
     turnaroundId: string,
     flightId: string,
     data: Record<string, unknown>,
   ): Promise<void> {
+    const correlationId = uuidv4();
     const event: TurnaroundEvent = {
       id: uuidv4(),
       type: routingKey,
       turnaround_id: turnaroundId,
       flight_id: flightId,
+      correlationId,
       timestamp: new Date().toISOString(),
       data,
     };
@@ -102,11 +123,12 @@ export class TurnaroundEventPublisher {
         persistent: true,
         contentType: 'application/json',
         messageId: event.id,
+        correlationId,
         timestamp: Math.floor(Date.now() / 1000),
       });
 
       this.logger.log(
-        `Event published: ${routingKey} (turnaround: ${turnaroundId}, event: ${event.id})`,
+        `Event published: ${routingKey} (turnaround: ${turnaroundId}, event: ${event.id}, corr: ${correlationId})`,
       );
     } catch (error) {
       this.logger.error(

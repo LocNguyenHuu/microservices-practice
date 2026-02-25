@@ -1,7 +1,7 @@
 # Consumes turnaround events from the crew-turnaround-queue.
 # Binds to turnaround.events exchange with routing keys:
-#   - turnaround.started → auto-assign crew to tasks
-#   - turnaround.task.completed → free crew member
+#   - turnaround.started → auto-assign crew AND equipment to tasks
+#   - turnaround.task.completed → free crew member AND release equipment
 #
 # Uses aio_pika.connect_robust() for auto-reconnection.
 # Single callback dispatches by event type (same pattern as NestJS consumer).
@@ -13,6 +13,7 @@ import aio_pika
 
 from ..events.publisher import EventPublisher
 from ..services.assignment_service import TaskInfo, auto_assign_crew, free_crew_member
+from ..services.equipment_service import auto_assign_equipment, release_equipment
 from ..database import async_session
 
 logger = logging.getLogger("crew-service")
@@ -64,11 +65,14 @@ class EventConsumer:
                 event_type = body.get("type", "")
                 logger.info(
                     f"Received {event_type}: turnaround={body.get('turnaround_id')} "
-                    f"event={body.get('id')}"
+                    f"event={body.get('id')} corr={body.get('correlationId', '')}"
                 )
 
+                # Extract correlation ID from incoming event for propagation
+                correlation_id = body.get("correlationId", "")
+
                 if event_type == "turnaround.started":
-                    await self._handle_turnaround_started(body, message)
+                    await self._handle_turnaround_started(body, message, correlation_id)
                 elif event_type == "turnaround.task.completed":
                     await self._handle_task_completed(body)
                 else:
@@ -76,14 +80,12 @@ class EventConsumer:
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
-                # For turnaround.started, requeue is critical.
-                # message.process(requeue=False) already acked, so we rely on
-                # idempotent processing on next delivery.
 
     async def _handle_turnaround_started(
-        self, body: dict, message: aio_pika.abc.AbstractIncomingMessage
+        self, body: dict, message: aio_pika.abc.AbstractIncomingMessage,
+        correlation_id: str = "",
     ) -> None:
-        """Auto-assign crew to turnaround tasks based on certifications."""
+        """Auto-assign crew AND equipment to turnaround tasks."""
         data = body.get("data", {})
         turnaround_id = data.get("turnaround_id", body.get("turnaround_id", ""))
         flight_id = data.get("flight_id", body.get("flight_id", ""))
@@ -101,28 +103,45 @@ class EventConsumer:
 
         logger.info(
             f"Processing turnaround.started: turnaround={turnaround_id}, "
-            f"flight={flight_id}, tasks={len(tasks)}"
+            f"flight={flight_id}, tasks={len(tasks)}, corr={correlation_id}"
         )
 
+        # 1) Auto-assign crew members
         async with async_session() as db:
-            assignments = await auto_assign_crew(db, turnaround_id, flight_id, tasks)
+            crew_assignments = await auto_assign_crew(db, turnaround_id, flight_id, tasks)
 
-        # Publish events for each assignment result
-        for result in assignments:
+        for result in crew_assignments:
             if result.get("assigned"):
-                await self._publisher.publish_crew_assigned(result)
+                await self._publisher.publish_crew_assigned(result, correlation_id or None)
             else:
-                await self._publisher.publish_crew_unavailable(result)
+                await self._publisher.publish_crew_unavailable(result, correlation_id or None)
 
-        assigned_count = sum(1 for a in assignments if a.get("assigned"))
-        total = len(assignments)
+        crew_assigned = sum(1 for a in crew_assignments if a.get("assigned"))
         logger.info(
-            f"Auto-assignment complete: {assigned_count}/{total} tasks assigned "
+            f"Crew auto-assignment: {crew_assigned}/{len(crew_assignments)} "
+            f"for turnaround {turnaround_id}"
+        )
+
+        # 2) Auto-assign equipment (parallel to crew)
+        async with async_session() as db:
+            equip_assignments = await auto_assign_equipment(
+                db, turnaround_id, flight_id, raw_tasks
+            )
+
+        for result in equip_assignments:
+            if result.get("assigned"):
+                await self._publisher.publish_equipment_assigned(result, correlation_id or None)
+            else:
+                await self._publisher.publish_equipment_unavailable(result, correlation_id or None)
+
+        equip_assigned = sum(1 for a in equip_assignments if a.get("assigned"))
+        logger.info(
+            f"Equipment auto-assignment: {equip_assigned}/{len(equip_assignments)} "
             f"for turnaround {turnaround_id}"
         )
 
     async def _handle_task_completed(self, body: dict) -> None:
-        """Free crew member when a turnaround task is completed."""
+        """Free crew member AND release equipment when a task is completed."""
         data = body.get("data", {})
         turnaround_id = data.get("turnaround_id", body.get("turnaround_id", ""))
         task_id = data.get("task_id", "")
@@ -133,11 +152,34 @@ class EventConsumer:
             f"in turnaround={turnaround_id}"
         )
 
+        # Free crew member
         async with async_session() as db:
-            result = await free_crew_member(db, turnaround_id, task_id)
+            crew_result = await free_crew_member(db, turnaround_id, task_id)
 
-        if result:
+        if crew_result:
             logger.info(
-                f"Crew member {result['crew_member_id']} freed from "
+                f"Crew member {crew_result['crew_member_id']} freed from "
                 f"task {task_name} in turnaround {turnaround_id}"
             )
+
+        # Release equipment assigned to this task
+        from ..models.equipment import EquipmentAssignment
+        from sqlalchemy import select, and_
+
+        async with async_session() as db:
+            stmt = select(EquipmentAssignment).where(
+                and_(
+                    EquipmentAssignment.turnaround_id == turnaround_id,
+                    EquipmentAssignment.task_id == task_id,
+                    EquipmentAssignment.released_at.is_(None),
+                )
+            )
+            result = await db.execute(stmt)
+            assignment = result.scalar_one_or_none()
+            if assignment:
+                released = await release_equipment(db, assignment.equipment_id)
+                if released:
+                    logger.info(
+                        f"Equipment {assignment.equipment_id} released from "
+                        f"task {task_name} in turnaround {turnaround_id}"
+                    )

@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { Task, TaskSchema } from './task.schema';
+import { Milestones, MilestonesSchema } from './milestones.schema';
 
 export type TurnaroundDocument = HydratedDocument<Turnaround>;
 
@@ -51,6 +52,9 @@ export class Turnaround {
 
   @Prop({ default: 0 })
   progressPercent!: number;
+
+  @Prop({ type: MilestonesSchema, default: () => ({}) })
+  milestones!: Milestones;
 }
 
 export const TurnaroundSchema = SchemaFactory.createForClass(Turnaround);

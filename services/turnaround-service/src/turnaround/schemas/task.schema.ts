@@ -30,7 +30,13 @@ export class Task {
   order!: number;
 
   @Prop()
+  requiredEquipment?: string;
+
+  @Prop()
   assignedCrewId?: string;
+
+  @Prop()
+  assignedEquipmentId?: string;
 
   @Prop()
   startedAt?: Date;

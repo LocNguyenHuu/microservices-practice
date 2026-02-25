@@ -66,8 +66,10 @@ func main() {
 
 	// Wire up layers: repository → service → handler
 	flightRepo := repository.NewFlightRepository(database)
-	flightSvc := service.NewFlightService(flightRepo, publisher)
+	gateRepo := repository.NewGateRepository(database)
+	flightSvc := service.NewFlightService(flightRepo, gateRepo, publisher)
 	flightHandler := handler.NewFlightHandler(flightSvc)
+	gateHandler := handler.NewGateHandler(gateRepo)
 
 	// Configure HTTP router with middleware
 	r := chi.NewRouter()
@@ -77,6 +79,7 @@ func main() {
 
 	r.Get("/health", handler.HealthCheck)
 	r.Mount("/api/flights", flightHandler.Routes())
+	r.Mount("/api/gates", gateHandler.Routes())
 
 	// Start HTTP server
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)

@@ -15,4 +15,8 @@ export class UpdateTaskDto {
   @IsString()
   @IsOptional()
   assignedCrewId?: string;
+
+  @IsString()
+  @IsOptional()
+  assignedEquipmentId?: string;
 }

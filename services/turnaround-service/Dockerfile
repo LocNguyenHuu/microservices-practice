@@ -17,9 +17,10 @@ RUN addgroup -g 1001 -S nestjs && \
 
 WORKDIR /app
 
+COPY --from=builder /app/package.json /app/package-lock.json* ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
 
 USER nestjs
 

@@ -8,6 +8,7 @@ import {
   TurnaroundSchema,
 } from './schemas/turnaround.schema';
 import { EventsModule } from '../events/events.module';
+import { WeatherModule } from '../weather/weather.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { EventsModule } from '../events/events.module';
     // TurnaroundEventPublisher which this module needs, while EventsModule's
     // FlightEventConsumer needs TurnaroundService from this module.
     forwardRef(() => EventsModule),
+    WeatherModule,
   ],
   controllers: [TurnaroundController],
   providers: [TurnaroundService, TurnaroundRepository],

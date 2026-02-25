@@ -10,6 +10,7 @@ import {
 import { TurnaroundService } from './turnaround.service';
 import { CreateTurnaroundDto } from './dto/create-turnaround.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { UpdateMilestonesDto } from './dto/update-milestones.dto';
 import { TurnaroundStatus } from './schemas/turnaround.schema';
 
 // REST API for managing turnaround operations.
@@ -52,5 +53,14 @@ export class TurnaroundController {
     @Body() dto: UpdateTaskDto,
   ) {
     return this.turnaroundService.updateTask(id, taskId, dto);
+  }
+
+  // PATCH /api/turnarounds/:id/milestones — Update A-CDM milestones (TOBT, TSAT, etc.)
+  @Patch(':id/milestones')
+  async updateMilestones(
+    @Param('id') id: string,
+    @Body() dto: UpdateMilestonesDto,
+  ) {
+    return this.turnaroundService.updateMilestones(id, dto);
   }
 }

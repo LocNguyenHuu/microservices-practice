@@ -16,21 +16,23 @@ import (
 type EventType string
 
 const (
-	FlightArrived     EventType = "flight.arrived"      // Aircraft has landed and reached gate
-	FlightDeparted    EventType = "flight.departed"      // Aircraft has left the gate
-	FlightBoarding    EventType = "flight.boarding"      // Passengers are boarding
-	FlightGateChanged EventType = "flight.gate.changed"  // Gate reassignment occurred
-	FlightDelayed     EventType = "flight.delayed"       // Schedule has been updated with delay
+	FlightArrived      EventType = "flight.arrived"       // Aircraft has landed and reached gate
+	FlightDeparted     EventType = "flight.departed"       // Aircraft has left the gate
+	FlightBoarding     EventType = "flight.boarding"       // Passengers are boarding
+	FlightGateChanged  EventType = "flight.gate.changed"   // Gate reassignment occurred
+	FlightDelayed      EventType = "flight.delayed"        // Schedule has been updated with delay
+	FlightGateConflict EventType = "flight.gate.conflict"  // Two flights overlap on the same gate
 )
 
 // FlightEvent is the envelope for all flight-related domain events
 // published to the message broker.
 type FlightEvent struct {
-	ID        string    `json:"id"`         // Unique event ID
-	Type      EventType `json:"type"`       // Event type (routing key)
-	FlightID  string    `json:"flight_id"`  // ID of the flight that triggered this event
-	Timestamp time.Time `json:"timestamp"`  // When the event was created
-	Data      any       `json:"data"`       // Event-specific payload
+	ID            string    `json:"id"`            // Unique event ID
+	Type          EventType `json:"type"`          // Event type (routing key)
+	FlightID      string    `json:"flight_id"`     // ID of the flight that triggered this event
+	CorrelationID string    `json:"correlationId"` // Correlation ID for end-to-end tracing
+	Timestamp     time.Time `json:"timestamp"`     // When the event was created
+	Data          any       `json:"data"`          // Event-specific payload
 }
 
 // Publisher defines the interface for publishing flight domain events.
@@ -53,11 +55,12 @@ func NewStubPublisher() *StubPublisher {
 // by RabbitMQPublisher which sends to the flight.events topic exchange.
 func (p *StubPublisher) Publish(eventType EventType, flightID uuid.UUID, data any) error {
 	evt := FlightEvent{
-		ID:        uuid.New().String(),
-		Type:      eventType,
-		FlightID:  flightID.String(),
-		Timestamp: time.Now().UTC(),
-		Data:      data,
+		ID:            uuid.New().String(),
+		Type:          eventType,
+		FlightID:      flightID.String(),
+		CorrelationID: uuid.New().String(),
+		Timestamp:     time.Now().UTC(),
+		Data:          data,
 	}
 
 	payload, err := json.Marshal(evt)

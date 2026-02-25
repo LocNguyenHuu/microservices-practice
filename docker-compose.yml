@@ -1,9 +1,11 @@
 services:
+  # ── Infrastructure ──────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
+    profiles: ["core", "flight", "ops", "full"]
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
@@ -14,9 +16,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    profiles: ["core", "flight", "ops", "full"]
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -25,9 +32,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   mongodb:
     image: mongo:7
+    profiles: ["core", "flight", "ops", "full"]
     ports:
       - "27017:27017"
     environment:
@@ -39,17 +51,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
+  # ── Application Services ────────────────────────────────────────
   flight-service:
     build:
       context: ./services/flight-service
       dockerfile: Dockerfile
+    profiles: ["flight", "ops", "full"]
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/flight_db?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/flight_db?sslmode=disable
       SERVER_PORT: "8080"
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,17 +79,23 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
   turnaround-service:
     build:
       context: ./services/turnaround-service
       dockerfile: Dockerfile
+    profiles: ["ops", "full"]
     ports:
       - "3000:3000"
     environment:
       PORT: "3000"
       MONGODB_URI: mongodb://mongodb:27017/turnaround_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      DATA_INGESTION_URL: http://data-ingestion-service:8002
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -83,16 +107,21 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   crew-service:
     build:
       context: ./services/crew-service
       dockerfile: Dockerfile
+    profiles: ["ops", "full"]
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/crew_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/crew_db
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
       PORT: "8000"
     depends_on:
       postgres:
@@ -105,16 +134,21 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 192M
 
   ops-hub-service:
     build:
       context: ./services/ops-hub-service
       dockerfile: Dockerfile
+    profiles: ["ops", "full"]
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ops_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2f
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ops_db
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/%2f
       SERVER_PORT: "8001"
       FLIGHT_SERVICE_URL: http://flight-service:8080
       TURNAROUND_SERVICE_URL: http://turnaround-service:3000
@@ -137,6 +171,60 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  data-ingestion-service:
+    build:
+      context: ./services/data-ingestion-service
+      dockerfile: Dockerfile
+    profiles: ["full"]
+    ports:
+      - "8002:8002"
+    environment:
+      FLIGHT_SERVICE_URL: http://flight-service:8080
+      TURNAROUND_SERVICE_URL: http://turnaround-service:3000
+      AVIATIONSTACK_API_KEY: ${AVIATIONSTACK_API_KEY:-}
+      CHECKWX_API_KEY: ${CHECKWX_API_KEY:-}
+      TARGET_AIRPORT: ${TARGET_AIRPORT:-DXB}
+      POLL_INTERVAL_MINUTES: "${POLL_INTERVAL_MINUTES:-30}"
+      WEATHER_POLL_INTERVAL_MINUTES: "${WEATHER_POLL_INTERVAL_MINUTES:-15}"
+    depends_on:
+      flight-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  dashboard:
+    build:
+      context: ./services/dashboard
+      dockerfile: Dockerfile
+    profiles: ["full"]
+    ports:
+      - "5173:80"
+    depends_on:
+      flight-service:
+        condition: service_healthy
+      turnaround-service:
+        condition: service_healthy
+      crew-service:
+        condition: service_healthy
+      ops-hub-service:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
 
 volumes:
   postgres_data:

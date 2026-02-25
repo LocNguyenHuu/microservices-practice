@@ -132,12 +132,14 @@ func (p *RabbitMQPublisher) handleReconnect() {
 // Publish sends a flight event to the flight.events exchange using the
 // event type as the routing key. Messages are persistent (survive broker restart).
 func (p *RabbitMQPublisher) Publish(eventType EventType, flightID uuid.UUID, data any) error {
+	correlationID := uuid.New().String()
 	evt := FlightEvent{
-		ID:        uuid.New().String(),
-		Type:      eventType,
-		FlightID:  flightID.String(),
-		Timestamp: time.Now().UTC(),
-		Data:      data,
+		ID:            uuid.New().String(),
+		Type:          eventType,
+		FlightID:      flightID.String(),
+		CorrelationID: correlationID,
+		Timestamp:     time.Now().UTC(),
+		Data:          data,
 	}
 
 	body, err := json.Marshal(evt)
@@ -159,11 +161,12 @@ func (p *RabbitMQPublisher) Publish(eventType EventType, flightID uuid.UUID, dat
 		false,               // mandatory
 		false,               // immediate
 		amqp.Publishing{
-			ContentType:  "application/json",
-			DeliveryMode: amqp.Persistent,
-			MessageId:    evt.ID,
-			Timestamp:    evt.Timestamp,
-			Body:         body,
+			ContentType:   "application/json",
+			DeliveryMode:  amqp.Persistent,
+			MessageId:     evt.ID,
+			CorrelationId: correlationID,
+			Timestamp:     evt.Timestamp,
+			Body:          body,
 		},
 	)
 	if err != nil {
@@ -174,6 +177,7 @@ func (p *RabbitMQPublisher) Publish(eventType EventType, flightID uuid.UUID, dat
 		"type", string(eventType),
 		"flight_id", flightID.String(),
 		"event_id", evt.ID,
+		"correlation_id", correlationID,
 	)
 	return nil
 }
